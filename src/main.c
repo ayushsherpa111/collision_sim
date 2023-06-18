@@ -1,8 +1,10 @@
+#include "./cust_type/vector.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_gpu.h>
 #include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_pixels.h>
+#include <SDL2/SDL_render.h>
 #include <SDL2/SDL_timer.h>
 #include <math.h>
 #include <stdbool.h>
@@ -14,7 +16,7 @@
 
 bool is_overlapping(float px, float py, float tx, float ty, float r1, float r2);
 float distance(float x1, float x2, float y1, float y2);
-
+float cap(float val, float max);
 typedef struct circle circle;
 
 struct circle {
@@ -22,6 +24,7 @@ struct circle {
   float vx, vy;
   float ax, ay;
   float radius;
+  float mass;
 
   int id;
 };
@@ -32,6 +35,10 @@ struct collision_pair {
 };
 
 void handle_input(SDL_Event *, int *, circle *, int);
+void handle_collision(collision_pair pair);
+
+const int WIN_WIDTH = 1000;
+const int WIN_HEIGHT = 700;
 
 int main() {
   GPU_Target *screen;
@@ -42,16 +49,18 @@ int main() {
   uint32_t start_time;
   uint32_t end_time;
   double elapsed_time;
-  collision_pair *collided_circles;
+  vector *vec_collisions;
   int collision_buffer;
 
-  screen = GPU_Init(600, 600, GPU_INIT_DISABLE_VSYNC | GPU_DEFAULT_INIT_FLAGS);
+  screen = GPU_Init(WIN_WIDTH, WIN_HEIGHT,
+                    GPU_INIT_DISABLE_VSYNC | GPU_DEFAULT_INIT_FLAGS);
   is_running = 1;
-  num_circles = 10;
-  min_radius = 20;
-  max_radius = 50;
-  max_velocity = 5;
+  num_circles = 20;
+  min_radius = 25;
+  max_radius = 30;
+  max_velocity = 500;
   collision_buffer = num_circles * 2;
+  vec_collisions = make(sizeof(collision_pair), 30);
 
   printf("Initializing Screen...\n");
 
@@ -72,8 +81,6 @@ int main() {
   };
 
   circle *circles = (circle *)malloc(sizeof(circle) * num_circles);
-  collided_circles =
-      (collision_pair *)malloc(sizeof(collision_pair) * collision_buffer);
   srand(time(NULL));
   for (int i = 0; i < num_circles; i++) {
     circle c = {.xpos = min_radius + rand() % screen->w,
@@ -84,6 +91,7 @@ int main() {
                 .ay = 0,
                 .radius = min_radius + rand() % max_radius,
                 .id = i};
+    c.mass = M_PI * c.radius * c.radius;
     circles[i] = c;
   }
 
@@ -91,19 +99,28 @@ int main() {
     start_time = SDL_GetTicks();
     handle_input(&ev, &is_running, circles, num_circles);
     GPU_ClearColor(screen, bg);
-
     for (int i = 0; i < num_circles; i++) {
       GPU_Circle(screen, circles[i].xpos, circles[i].ypos, circles[i].radius,
                  color);
+      circles[i].ax = -circles[i].vx * 0.08f;
+      circles[i].ay = -circles[i].vy * 0.08f;
 
-      circles[i].xpos += circles[i].vx;
-      circles[i].ypos += circles[i].vy;
+      circles[i].vx += circles[i].ax * elapsed_time;
+      circles[i].vy += circles[i].ay * elapsed_time;
+
+      circles[i].vx = cap(circles[i].vx, max_velocity);
+      circles[i].vy = cap(circles[i].vy, max_velocity);
+
+      circles[i].xpos += circles[i].vx * elapsed_time;
+      circles[i].ypos += circles[i].vy * elapsed_time;
 
       for (int circA = 0; circA < num_circles; circA++) {
         if ((circles[i].id != circles[circA].id) &&
             is_overlapping(circles[i].xpos, circles[i].ypos,
                            circles[circA].xpos, circles[circA].ypos,
                            circles[i].radius, circles[circA].radius)) {
+          collision_pair pair = {&circles[i], &circles[circA]};
+          append(vec_collisions, &pair);
           float distA_B = distance(circles[i].xpos, circles[circA].xpos,
                                    circles[i].ypos, circles[circA].ypos);
           float overlap =
@@ -122,22 +139,42 @@ int main() {
               overlap * (circles[i].ypos - circles[circA].ypos) / distA_B;
         }
       }
+      // handle collision
+      for (int collisions = 0; collisions < vec_collisions->len; collisions++) {
+        collision_pair *pair = pop(vec_collisions);
+        handle_collision(*pair);
+      }
 
-      if (circles[i].xpos >= screen->w)
-        circles[i].xpos -= screen->w;
-      if (circles[i].xpos < 0)
-        circles[i].xpos += screen->w;
+      if (fabs((powf(circles[i].vx, 2) + powf(circles[i].vy, 2))) < 0.01f) {
+        circles[i].vx = 0;
+        circles[i].vy = 0;
+      }
 
-      if (circles[i].ypos >= screen->h)
-        circles[i].ypos -= screen->h;
-      if (circles[i].ypos < 0)
-        circles[i].ypos += screen->h;
+      if (circles[i].xpos + circles[i].radius >= screen->w) {
+        circles[i].vx = -1 * circles[i].vx;
+        circles[i].ax = -1 * circles[i].ax;
+      }
+      if (circles[i].xpos - circles[i].radius < 0) {
+        // circles[i].xpos += circles[i].radius;
+        circles[i].vx = fabs(circles[i].vx);
+        circles[i].ax = fabs(circles[i].ax);
+      }
+
+      if (circles[i].ypos + circles[i].radius >= screen->h) {
+        circles[i].vy = -1 * circles[i].vy;
+        circles[i].ay = -1 * circles[i].ay;
+      }
+      if (circles[i].ypos - circles[i].radius < 0) {
+        // circles[i].ypos += circles[i].radius;
+        circles[i].vy = fabs(circles[i].vy);
+        circles[i].ay = fabs(circles[i].ay);
+      }
     }
 
     GPU_Flip(screen);
     SDL_Delay(20);
     end_time = SDL_GetTicks();
-    elapsed_time = end_time - start_time;
+    elapsed_time = (end_time - start_time) / 1000.0;
   }
   GPU_Quit();
 }
@@ -169,7 +206,7 @@ void handle_input(SDL_Event *ev, int *is_running, circle *circles,
 
       mouseX = ev->button.x;
       mouseY = ev->button.y;
-      for (int i = 0; i < num_circles; i++) {
+      for (int i = 0; i <= num_circles; i++) {
         dist_mouse_circ =
             distance(mouseX, circles[i].xpos, mouseY, circles[i].ypos);
         if (dist_mouse_circ <= circles[i].radius) {
@@ -190,6 +227,40 @@ void handle_input(SDL_Event *ev, int *is_running, circle *circles,
   }
 }
 
+void handle_collision(collision_pair pair) {
+  printf("A: %d B: %d\n", pair.ballA->id, pair.ballB->id);
+  circle *ball_A = pair.ballA;
+  circle *ball_B = pair.ballB;
+
+  float fDistance = sqrtf(powf(ball_A->xpos - ball_B->xpos, 2.0) +
+                          powf(ball_A->ypos - ball_B->ypos, 2.0));
+
+  float nx = (ball_B->xpos - ball_A->xpos) / fDistance;
+  float ny = (ball_B->ypos - ball_A->ypos) / fDistance;
+
+  float tx = -ny;
+  float ty = nx;
+
+  float tanDP_A = ball_A->vx * tx + ball_A->vy * ty;
+  float tanDP_B = ball_B->vx * tx + ball_B->vy * ty;
+
+  float dpNorm_A = ball_A->vx * nx + ball_A->vy * ny;
+  float dpNorm_B = ball_B->vx * nx + ball_B->vy * ny;
+
+  float m1 = (dpNorm_A * (ball_A->mass - ball_B->mass) +
+              2.0f * ball_B->mass * dpNorm_B) /
+             (ball_A->mass + ball_B->mass);
+  float m2 = (dpNorm_B * (ball_B->mass - ball_A->mass) +
+              2.0f * ball_A->mass * dpNorm_A) /
+             (ball_A->mass + ball_B->mass);
+
+  ball_A->vx = tx * tanDP_A + nx * m1;
+  ball_A->vy = ty * tanDP_A + ny * m1;
+
+  ball_B->vx = tx * tanDP_B + nx * m2;
+  ball_B->vy = ty * tanDP_B + ny * m2;
+}
+
 bool is_overlapping(float px, float py, float tx, float ty, float r1,
                     float r2) {
   return (px - tx) * (px - tx) + (py - ty) * (py - ty) <= (r1 + r2) * (r1 + r2);
@@ -203,8 +274,4 @@ float distance(float x1, float x2, float y1, float y2) {
   return distance;
 }
 
-void push(collision_pair *pair, int bfr_size, circle *circleA,
-          circle *circleB) {
-  for (int i = 0; i < bfr_size; i++) {
-  }
-}
+float cap(float val, float max) { return val >= max ? max : val; }
