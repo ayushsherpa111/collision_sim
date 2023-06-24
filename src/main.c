@@ -25,6 +25,7 @@ struct circle {
   float ax, ay;
   float radius;
   float mass;
+  SDL_Color color;
 
   int id;
 };
@@ -83,14 +84,16 @@ int main() {
   circle *circles = (circle *)malloc(sizeof(circle) * num_circles);
   srand(time(NULL));
   for (int i = 0; i < num_circles; i++) {
-    circle c = {.xpos = min_radius + rand() % screen->w,
-                .ypos = min_radius + rand() % screen->h,
-                .vx = rand() % max_velocity,
-                .vy = rand() % max_velocity,
-                .ax = 0,
-                .ay = 0,
-                .radius = min_radius + rand() % max_radius,
-                .id = i};
+    circle c = {
+        .xpos = min_radius + rand() % screen->w,
+        .ypos = min_radius + rand() % screen->h,
+        .vx = rand() % max_velocity,
+        .vy = rand() % max_velocity,
+        .ax = 0,
+        .ay = 0,
+        .radius = min_radius + rand() % max_radius,
+        .color = {rand() % 256, rand() % 256, rand() % 256, SDL_ALPHA_OPAQUE},
+        .id = i};
     c.mass = M_PI * c.radius * c.radius;
     circles[i] = c;
   }
@@ -101,7 +104,7 @@ int main() {
     GPU_ClearColor(screen, bg);
     for (int i = 0; i < num_circles; i++) {
       GPU_Circle(screen, circles[i].xpos, circles[i].ypos, circles[i].radius,
-                 color);
+                 circles[i].color);
       circles[i].ax = -circles[i].vx * 0.08f;
       circles[i].ay = -circles[i].vy * 0.08f;
 
@@ -259,6 +262,8 @@ void handle_collision(collision_pair pair) {
 
   ball_B->vx = tx * tanDP_B + nx * m2;
   ball_B->vy = ty * tanDP_B + ny * m2;
+
+  ball_B->color = ball_A->color;
 }
 
 bool is_overlapping(float px, float py, float tx, float ty, float r1,
