@@ -18,13 +18,18 @@ bool is_overlapping(float px, float py, float tx, float ty, float r1, float r2);
 float distance(float x1, float x2, float y1, float y2);
 float cap(float val, float max);
 typedef struct circle circle;
+typedef struct vector_M vector_M;
+
+struct vector_M {
+  double x, y;
+};
 
 struct circle {
-  float xpos, ypos;
-  float vx, vy;
-  float ax, ay;
-  float radius;
-  float mass;
+  double xpos, ypos;
+  double vx, vy;
+  double ax, ay;
+  double radius;
+  double mass;
   SDL_Color color;
 
   int id;
@@ -37,6 +42,7 @@ struct collision_pair {
 
 void handle_input(SDL_Event *, int *, circle *, int);
 void handle_collision(collision_pair pair);
+vector_M scale_vector(double vx, double vy);
 
 const int WIN_WIDTH = 1000;
 const int WIN_HEIGHT = 700;
@@ -97,14 +103,21 @@ int main() {
     c.mass = M_PI * c.radius * c.radius;
     circles[i] = c;
   }
-
+  SDL_Color black = {0x00, 0x00, 0x00, SDL_ALPHA_OPAQUE};
   while (is_running) {
     start_time = SDL_GetTicks();
     handle_input(&ev, &is_running, circles, num_circles);
     GPU_ClearColor(screen, bg);
     for (int i = 0; i < num_circles; i++) {
-      GPU_Circle(screen, circles[i].xpos, circles[i].ypos, circles[i].radius,
-                 circles[i].color);
+      GPU_CircleFilled(screen, circles[i].xpos, circles[i].ypos,
+                       circles[i].radius, circles[i].color);
+      vector_M unt_vec = scale_vector(circles[i].vx, circles[i].vy);
+      printf("Unit Vec %f %f\n", unt_vec.x, unt_vec.y);
+      printf("Vector   %f %f\n", circles[i].vx, circles[i].vy);
+      GPU_Line(screen, circles[i].xpos, circles[i].ypos,
+               circles[i].xpos + (unt_vec.x * circles[i].radius),
+               circles[i].ypos + (unt_vec.y * circles[i].radius), black);
+
       circles[i].ax = -circles[i].vx * 0.08f;
       circles[i].ay = -circles[i].vy * 0.08f;
 
@@ -148,7 +161,7 @@ int main() {
         handle_collision(*pair);
       }
 
-      if (fabs((powf(circles[i].vx, 2) + powf(circles[i].vy, 2))) < 0.01f) {
+      if (fabs((pow(circles[i].vx, 2) + pow(circles[i].vy, 2))) < 0.01f) {
         circles[i].vx = 0;
         circles[i].vy = 0;
       }
@@ -158,7 +171,6 @@ int main() {
         circles[i].ax = -1 * circles[i].ax;
       }
       if (circles[i].xpos - circles[i].radius < 0) {
-        // circles[i].xpos += circles[i].radius;
         circles[i].vx = fabs(circles[i].vx);
         circles[i].ax = fabs(circles[i].ax);
       }
@@ -168,7 +180,6 @@ int main() {
         circles[i].ay = -1 * circles[i].ay;
       }
       if (circles[i].ypos - circles[i].radius < 0) {
-        // circles[i].ypos += circles[i].radius;
         circles[i].vy = fabs(circles[i].vy);
         circles[i].ay = fabs(circles[i].ay);
       }
@@ -235,8 +246,8 @@ void handle_collision(collision_pair pair) {
   circle *ball_A = pair.ballA;
   circle *ball_B = pair.ballB;
 
-  float fDistance = sqrtf(powf(ball_A->xpos - ball_B->xpos, 2.0) +
-                          powf(ball_A->ypos - ball_B->ypos, 2.0));
+  float fDistance = sqrt(pow(ball_A->xpos - ball_B->xpos, 2.0) +
+                         pow(ball_A->ypos - ball_B->ypos, 2.0));
 
   float nx = (ball_B->xpos - ball_A->xpos) / fDistance;
   float ny = (ball_B->ypos - ball_A->ypos) / fDistance;
@@ -280,3 +291,11 @@ float distance(float x1, float x2, float y1, float y2) {
 }
 
 float cap(float val, float max) { return val >= max ? max : val; }
+
+vector_M scale_vector(double vx, double vy) {
+  vector_M unt_vec;
+  double mag_vec = sqrtf(vx * vx + vy * vy);
+  unt_vec.x = (vx / mag_vec);
+  unt_vec.y = (vy / mag_vec);
+  return unt_vec;
+}
